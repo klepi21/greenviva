@@ -20,6 +20,9 @@ const parseAmount = (text: string): number | null => {
   return parseFloat(amount);
 };
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   const headers = new Headers();
   headers.set('Content-Type', 'text/event-stream');

@@ -48,6 +48,9 @@ function decodeEmailBody(encodedBody: string): string {
   }
 }
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'edge';
+
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -62,7 +65,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Your session has expired. Please sign in again.' }, { status: 401 });
     }
 
-    const searchParams = new URL(request.url).searchParams;
+    const url = new URL(request.url);
+    const searchParams = url.searchParams;
     const dateParam = searchParams.get('date');
     const date = dateParam ? parseISO(dateParam) : new Date();
     
@@ -151,7 +155,7 @@ export async function GET(request: Request) {
             console.log(`No transfer data found in message ${message.id}`);
           }
         } catch (error: any) {
-          if (error.response?.status === 401 || error.code === 401) {
+          if (error.response?.status === 401) {
             return NextResponse.json(
               { error: 'Your session has expired. Please sign in again.' },
               { status: 401 }

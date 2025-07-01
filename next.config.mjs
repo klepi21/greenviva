@@ -6,6 +6,10 @@ const nextConfig = {
   images: {
     domains: ['lh3.googleusercontent.com'], // For Google profile images
   },
+  // Ensure API routes are handled server-side
+  experimental: {
+    serverActions: true,
+  },
 };
 
 export default nextConfig;
