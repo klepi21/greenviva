@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import { format, startOfYear, endOfYear, eachMonthOfInterval } from 'date-fns';
 
@@ -17,8 +17,15 @@ export default function MonthlyOverviewPage() {
   const [loadingProgress, setLoadingProgress] = useState<{ current: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState(2025);
+  const [lastFetchTime, setLastFetchTime] = useState<number>(0);
 
-  const fetchMonthlyData = async (year: number) => {
+  const fetchMonthlyData = useCallback(async (year: number, force: boolean = false) => {
+    // Prevent fetching if less than 5 minutes have passed since last fetch
+    const now = Date.now();
+    if (!force && now - lastFetchTime < 5 * 60 * 1000) {
+      return;
+    }
+
     try {
       setLoading(true);
       setLoadingProgress(null);
@@ -29,63 +36,31 @@ export default function MonthlyOverviewPage() {
         throw new Error('Failed to fetch monthly data');
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('Stream not available');
+      // Create a map of all months in the year with zero values
+      const allMonths = eachMonthOfInterval({
+        start: startOfYear(new Date(year, 0)),
+        end: endOfYear(new Date(year, 0))
+      }).map(date => ({
+        month: format(date, 'MMMM yyyy'),
+        totalAmount: 0,
+        numberOfTransfers: 0
+      }));
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error);
       }
 
-      const decoder = new TextDecoder();
-      let buffer = '';
+      // Merge actual data with the zero-value months
+      const mergedData = allMonths.map(month => {
+        const actualData = data.monthlyTotals.find(
+          (d: MonthlyTotal) => d.month === month.month
+        );
+        return actualData || month;
+      });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              
-              if (data.error) {
-                throw new Error(data.error);
-              }
-
-              if (data.type === 'progress') {
-                setLoadingProgress({
-                  current: data.current,
-                  total: data.total
-                });
-              } else if (data.type === 'data') {
-                // Create a map of all months in the year with zero values
-                const allMonths = eachMonthOfInterval({
-                  start: startOfYear(new Date(year, 0)),
-                  end: endOfYear(new Date(year, 0))
-                }).map(date => ({
-                  month: format(date, 'MMMM yyyy'),
-                  totalAmount: 0,
-                  numberOfTransfers: 0
-                }));
-
-                // Merge actual data with the zero-value months
-                const mergedData = allMonths.map(month => {
-                  const actualData = data.monthlyTotals.find(
-                    (d: MonthlyTotal) => d.month === month.month
-                  );
-                  return actualData || month;
-                });
-
-                setMonthlyData(mergedData);
-              }
-            } catch (e) {
-              console.error('Error parsing SSE data:', e);
-            }
-          }
-        }
-      }
+      setMonthlyData(mergedData);
+      setLastFetchTime(now);
     } catch (err) {
       console.error('Error fetching monthly data:', err);
       setError('Failed to fetch monthly data. Please try again later.');
@@ -93,15 +68,15 @@ export default function MonthlyOverviewPage() {
       setLoading(false);
       setLoadingProgress(null);
     }
-  };
+  }, [lastFetchTime]);
 
   useEffect(() => {
     if (status === 'authenticated' && session) {
-      fetchMonthlyData(selectedYear);
+      fetchMonthlyData(selectedYear, false);
     } else if (status === 'unauthenticated') {
       setError('Please sign in to view monthly data');
     }
-  }, [status, session]);
+  }, [status, session, selectedYear, fetchMonthlyData]);
 
   const yearOptions = [2023, 2024, 2025];
   
@@ -127,7 +102,7 @@ export default function MonthlyOverviewPage() {
               onChange={(e) => {
                 const year = Number(e.target.value);
                 setSelectedYear(year);
-                fetchMonthlyData(year);
+                fetchMonthlyData(year, true);
               }}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             >
@@ -138,7 +113,7 @@ export default function MonthlyOverviewPage() {
               ))}
             </select>
             <button
-              onClick={() => fetchMonthlyData(selectedYear)}
+              onClick={() => fetchMonthlyData(selectedYear, true)}
               disabled={loading}
               className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
@@ -163,7 +138,7 @@ export default function MonthlyOverviewPage() {
 
         {error ? (
           <div className="text-center py-6 text-red-600">{error}</div>
-        ) : loading ? (
+        ) : loading && !monthlyData.length ? (
           <div className="text-center py-6 space-y-3">
             <div className="text-gray-500">Loading monthly data...</div>
             {loadingProgress && (

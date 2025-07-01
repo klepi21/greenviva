@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
@@ -17,6 +17,7 @@ export default function DashboardPage() {
   const [goal] = useState(40);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastFetchTime, setLastFetchTime] = useState<number>(0);
   const [earningsData, setEarningsData] = useState<{
     totalAmount: number;
     goal: number;
@@ -33,7 +34,13 @@ export default function DashboardPage() {
     signIn('google');
   };
 
-  const fetchTransfers = async () => {
+  const fetchTransfers = useCallback(async (force: boolean = false) => {
+    // Prevent fetching if less than 5 minutes have passed since last fetch
+    const now = Date.now();
+    if (!force && now - lastFetchTime < 5 * 60 * 1000) {
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -56,6 +63,7 @@ export default function DashboardPage() {
         goal,
         transfers: data.transfers,
       });
+      setLastFetchTime(now);
     } catch (err: any) {
       console.error('Error fetching transfers:', err);
       setError(err.message || 'Failed to fetch transfers. Please try again later.');
@@ -67,7 +75,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [goal, lastFetchTime, handleSignOut]);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -77,8 +85,8 @@ export default function DashboardPage() {
       return;
     }
 
-    fetchTransfers();
-  }, [session, status, router]);
+    fetchTransfers(false);
+  }, [session, status, router, fetchTransfers]);
 
   const progressPercentage = (earningsData.totalAmount / goal) * 100;
 
@@ -90,7 +98,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (loading) {
+  if (loading && !earningsData.transfers.length) {
     return (
       <div className="flex justify-center items-center min-h-[60vh]">
         <div className="text-lg text-gray-600">Loading transfers...</div>
@@ -105,7 +113,7 @@ export default function DashboardPage() {
           <div className="text-lg text-red-600">{error}</div>
           {!error.includes('Session expired') && (
             <button
-              onClick={fetchTransfers}
+              onClick={() => fetchTransfers(true)}
               className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90"
             >
               Try Again
@@ -129,7 +137,7 @@ export default function DashboardPage() {
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-gray-900">Today's Overview</h2>
           <button
-            onClick={fetchTransfers}
+            onClick={() => fetchTransfers(true)}
             disabled={loading}
             className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
