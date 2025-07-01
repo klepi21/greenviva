@@ -10,6 +10,19 @@ const nextConfig = {
   experimental: {
     serverActions: true,
   },
+  async headers() {
+    return [
+      {
+        source: '/api/gmail/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-store, must-revalidate',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

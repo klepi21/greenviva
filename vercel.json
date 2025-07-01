@@ -1,17 +1,4 @@
 {
   "version": 2,
-  "buildCommand": "next build",
-  "devCommand": "next dev",
-  "installCommand": "npm install",
-  "framework": "nextjs",
-  "regions": ["fra1"],
-  "env": {
-    "NEXTAUTH_URL": "https://${VERCEL_URL}"
-  },
-  "functions": {
-    "api/gmail/**": {
-      "memory": 1024,
-      "maxDuration": 10
-    }
-  }
+  "regions": ["fra1"]
 } 
