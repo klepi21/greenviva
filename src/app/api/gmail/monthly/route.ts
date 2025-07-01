@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { google } from 'googleapis';
 import { format, parse, startOfYear, endOfYear } from 'date-fns';
@@ -21,122 +21,82 @@ const parseAmount = (text: string): number | null => {
 };
 
 export const dynamic = 'force-dynamic';
-export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
-  const headers = new Headers();
-  headers.set('Content-Type', 'text/event-stream');
-  headers.set('Cache-Control', 'no-cache');
-  headers.set('Connection', 'keep-alive');
+  try {
+    const session = await getServerSession(authOptions);
+    
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
 
-  const stream = new ReadableStream({
-    async start(controller) {
+    const searchParams = request.nextUrl.searchParams;
+    const year = parseInt(searchParams.get('year') || new Date().getFullYear().toString());
+
+    const startDate = startOfYear(new Date(year, 0));
+    const endDate = endOfYear(new Date(year, 0));
+
+    // @ts-ignore - We know the token exists because we checked for session
+    const gmail = await getGmailClient(session.accessToken);
+
+    const query = `from:no-reply@viva.com after:${format(startDate, 'yyyy/MM/dd')} before:${format(endDate, 'yyyy/MM/dd')}`;
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 500,
+    });
+
+    const messages = response.data.messages || [];
+    const monthlyTotals: { [key: string]: { totalAmount: number; numberOfTransfers: number } } = {};
+
+    for (const message of messages) {
       try {
-        const session = await getServerSession(authOptions);
-        
-        if (!session?.user?.email) {
-          controller.enqueue('data: ' + JSON.stringify({ error: 'Not authenticated' }) + '\n\n');
-          controller.close();
-          return;
-        }
-
-        const searchParams = request.nextUrl.searchParams;
-        const year = parseInt(searchParams.get('year') || new Date().getFullYear().toString());
-
-        const startDate = startOfYear(new Date(year, 0));
-        const endDate = endOfYear(new Date(year, 0));
-
-        // @ts-ignore - We know the token exists because we checked for session
-        const gmail = await getGmailClient(session.accessToken);
-
-        const query = `from:no-reply@viva.com after:${format(startDate, 'yyyy/MM/dd')} before:${format(endDate, 'yyyy/MM/dd')}`;
-        const response = await gmail.users.messages.list({
+        const email = await gmail.users.messages.get({
           userId: 'me',
-          q: query,
-          maxResults: 500,
+          id: message.id!,
+          format: 'full',
         });
 
-        const messages = response.data.messages || [];
-        let processedCount = 0;
-        const totalCount = messages.length;
+        const body = email.data.payload?.parts?.[0]?.body?.data ||
+                    email.data.payload?.body?.data || '';
+        const decodedBody = Buffer.from(body, 'base64').toString('utf8');
+        const amount = parseAmount(decodedBody);
 
-        // Send initial progress
-        controller.enqueue('data: ' + JSON.stringify({ 
-          type: 'progress',
-          current: processedCount,
-          total: totalCount 
-        }) + '\n\n');
-
-        const monthlyTotals: { [key: string]: { totalAmount: number; numberOfTransfers: number } } = {};
-
-        for (const message of messages) {
-          processedCount++;
-          const email = await gmail.users.messages.get({
-            userId: 'me',
-            id: message.id!,
-            format: 'full',
-          });
-
-          const body = email.data.payload?.parts?.[0]?.body?.data ||
-                      email.data.payload?.body?.data || '';
-          const decodedBody = Buffer.from(body, 'base64').toString('utf8');
-          const amount = parseAmount(decodedBody);
-
-          const headers = email.data.payload?.headers || [];
-          const dateHeader = headers.find(h => h.name?.toLowerCase() === 'date');
-          
-          if (!dateHeader?.value || !amount) {
-            // Send progress even for skipped emails
-            controller.enqueue('data: ' + JSON.stringify({ 
-              type: 'progress',
-              current: processedCount,
-              total: totalCount 
-            }) + '\n\n');
-            continue;
-          }
-
-          const emailDate = new Date(dateHeader.value);
-          const monthKey = format(emailDate, 'MMMM yyyy');
-
-          if (!monthlyTotals[monthKey]) {
-            monthlyTotals[monthKey] = { totalAmount: 0, numberOfTransfers: 0 };
-          }
-
-          monthlyTotals[monthKey].totalAmount += amount;
-          monthlyTotals[monthKey].numberOfTransfers += 1;
-
-          // Send progress update
-          controller.enqueue('data: ' + JSON.stringify({ 
-            type: 'progress',
-            current: processedCount,
-            total: totalCount 
-          }) + '\n\n');
+        const headers = email.data.payload?.headers || [];
+        const dateHeader = headers.find(h => h.name?.toLowerCase() === 'date');
+        
+        if (!dateHeader?.value || !amount) {
+          continue;
         }
 
-        // Convert to array and sort by date
-        const monthlyTotalsArray = Object.entries(monthlyTotals).map(([month, data]) => ({
-          month,
-          ...data
-        })).sort((a, b) => {
-          const dateA = parse(a.month, 'MMMM yyyy', new Date());
-          const dateB = parse(b.month, 'MMMM yyyy', new Date());
-          return dateA.getTime() - dateB.getTime();
-        });
+        const emailDate = new Date(dateHeader.value);
+        const monthKey = format(emailDate, 'MMMM yyyy');
 
-        // Send final data
-        controller.enqueue('data: ' + JSON.stringify({ 
-          type: 'data',
-          monthlyTotals: monthlyTotalsArray 
-        }) + '\n\n');
+        if (!monthlyTotals[monthKey]) {
+          monthlyTotals[monthKey] = { totalAmount: 0, numberOfTransfers: 0 };
+        }
 
-        controller.close();
+        monthlyTotals[monthKey].totalAmount += amount;
+        monthlyTotals[monthKey].numberOfTransfers += 1;
       } catch (error) {
-        console.error('Error in stream:', error);
-        controller.enqueue('data: ' + JSON.stringify({ error: 'Failed to fetch monthly data' }) + '\n\n');
-        controller.close();
+        console.error(`Error processing message ${message.id}:`, error);
+        continue;
       }
     }
-  });
 
-  return new Response(stream, { headers });
+    // Convert to array and sort by date
+    const monthlyTotalsArray = Object.entries(monthlyTotals).map(([month, data]) => ({
+      month,
+      ...data
+    })).sort((a, b) => {
+      const dateA = parse(a.month, 'MMMM yyyy', new Date());
+      const dateB = parse(b.month, 'MMMM yyyy', new Date());
+      return dateA.getTime() - dateB.getTime();
+    });
+
+    return NextResponse.json({ monthlyTotals: monthlyTotalsArray });
+  } catch (error) {
+    console.error('Error in monthly data fetch:', error);
+    return NextResponse.json({ error: 'Failed to fetch monthly data' }, { status: 500 });
+  }
 } 
