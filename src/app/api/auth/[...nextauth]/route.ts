@@ -1,4 +1,4 @@
-import NextAuth, { AuthOptions, Session } from 'next-auth';
+import NextAuth, { AuthOptions } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import { JWT } from 'next-auth/jwt';
 
@@ -18,7 +18,7 @@ declare module 'next-auth/jwt' {
   }
 }
 
-export const authOptions: AuthOptions = {
+const authOptions: AuthOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -72,13 +72,8 @@ export const authOptions: AuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   // Add debug logs in development
   debug: process.env.NODE_ENV === 'development',
-  // Increase timeout for the callback
-  timeout: 10000,
   // Better error handling
   events: {
-    async error(error) {
-      console.error('NextAuth Error:', error);
-    },
     async signIn({ user, account, profile, isNewUser }) {
       console.log('Successful sign in:', {
         user: user.email,
@@ -91,4 +86,5 @@ export const authOptions: AuthOptions = {
 };
 
 const handler = NextAuth(authOptions);
+
 export { handler as GET, handler as POST }; 
