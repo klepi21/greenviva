@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { google } from 'googleapis';
 import { format, parse, startOfYear, endOfYear } from 'date-fns';
-import { authOptions } from '../../auth/[...nextauth]/route';
+import { authOptions } from '../../auth/[...nextauth]/auth.config';
 
 const getGmailClient = async (accessToken: string) => {
   const auth = new google.auth.OAuth2();

@@ -2,7 +2,7 @@ import { google } from 'googleapis';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { format, parseISO, startOfDay, endOfDay, addDays } from 'date-fns';
-import { authOptions } from '../auth/[...nextauth]/route';
+import { authOptions } from '../auth/[...nextauth]/auth.config';
 
 interface Transfer {
   from: string;
