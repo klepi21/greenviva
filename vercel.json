@@ -9,7 +9,7 @@
     "NEXTAUTH_URL": "https://${VERCEL_URL}"
   },
   "functions": {
-    "/api/gmail/**": {
+    "api/gmail/**": {
       "memory": 1024,
       "maxDuration": 10
     }
