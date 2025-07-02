@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isToday } from 'date-fns';
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 
@@ -27,6 +27,7 @@ export default function DashboardPage() {
   const [showTipModal, setShowTipModal] = useState(false);
   const [tipAmount, setTipAmount] = useState('');
   const [tipNote, setTipNote] = useState('');
+  const [tipDate, setTipDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [tips, setTips] = useState<Tip[]>([]);
   const [earningsData, setEarningsData] = useState<{
     totalAmount: number;
@@ -62,13 +63,20 @@ export default function DashboardPage() {
     
     const newTip: Tip = {
       amount: parseFloat(tipAmount),
-      date: new Date().toISOString(),
+      date: new Date(`${tipDate}T12:00:00`).toISOString(), // Use noon of selected date
       note: tipNote || undefined
     };
 
-    setTips(prevTips => [...prevTips, newTip]);
+    setTips(prevTips => {
+      // Sort tips by date, most recent first
+      const newTips = [...prevTips, newTip].sort((a, b) => 
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      );
+      return newTips;
+    });
     setTipAmount('');
     setTipNote('');
+    setTipDate(format(new Date(), 'yyyy-MM-dd')); // Reset to today
     setShowTipModal(false);
   };
 
@@ -97,7 +105,6 @@ export default function DashboardPage() {
       
       if (!response.ok) {
         if (response.status === 401 || data.error?.includes('Gmail API error')) {
-          // If session expired or Gmail API error, sign out and redirect to sign in
           handleSignOut();
           throw new Error('Session expired. Please sign in again.');
         }
@@ -116,7 +123,6 @@ export default function DashboardPage() {
       console.error('Error fetching transfers:', err);
       setError(err.message || 'Failed to fetch transfers. Please try again later.');
       
-      // If error persists after retry, sign out and redirect to sign in
       if (err.message?.includes('Gmail API error')) {
         handleSignOut();
       }
@@ -238,25 +244,31 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Recent Transfers */}
+        {/* Recent Transfers and Tips */}
         <div>
-          <h3 className="text-lg font-medium text-gray-900 mb-3">Recent Transfers</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-3">Recent Activity</h3>
           {earningsData.transfers.length > 0 || tips.length > 0 ? (
             <div className="space-y-3">
-              {/* Today's Tips */}
-              {tips.filter(tip => tip.date.startsWith(new Date().toISOString().split('T')[0])).map((tip, index) => (
+              {/* Tips */}
+              {tips.map((tip, index) => (
                 <div
                   key={`tip-${index}`}
-                  className="flex justify-between items-center p-3 bg-green-50 rounded-lg"
+                  className={`flex justify-between items-center p-3 ${
+                    isToday(parseISO(tip.date)) ? 'bg-green-50' : 'bg-gray-50'
+                  } rounded-lg`}
                 >
                   <div>
-                    <p className="font-medium text-gray-900">Cash Tips{tip.note && ` - ${tip.note}`}</p>
+                    <p className="font-medium text-gray-900">
+                      Cash Tips{tip.note && ` - ${tip.note}`}
+                    </p>
                     <p className="text-sm text-gray-500">
-                      {format(parseISO(tip.date), 'HH:mm')}
+                      {format(parseISO(tip.date), 'MMM d, yyyy')}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-lg font-semibold text-green-600">
+                    <span className={`text-lg font-semibold ${
+                      isToday(parseISO(tip.date)) ? 'text-green-600' : 'text-gray-600'
+                    }`}>
                       €{tip.amount.toFixed(2)}
                     </span>
                     <button
@@ -277,7 +289,7 @@ export default function DashboardPage() {
                   <div>
                     <p className="font-medium text-gray-900">{transfer.from.replace(/<\/?(?:strong|br)>/g, '')}</p>
                     <p className="text-sm text-gray-500">
-                      {format(new Date(transfer.timestamp), 'HH:mm')}
+                      {format(new Date(transfer.timestamp), 'MMM d, yyyy HH:mm')}
                     </p>
                   </div>
                   <span className="text-lg font-semibold text-primary">
@@ -288,7 +300,7 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="text-center py-6 text-gray-500">
-              No transfers found for today
+              No activity found
             </div>
           )}
         </div>
@@ -300,6 +312,19 @@ export default function DashboardPage() {
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Add Tips</h3>
             <div className="space-y-4">
+              <div>
+                <label htmlFor="tipDate" className="block text-sm font-medium text-gray-700 mb-1">
+                  Date
+                </label>
+                <input
+                  type="date"
+                  id="tipDate"
+                  value={tipDate}
+                  onChange={(e) => setTipDate(e.target.value)}
+                  max={format(new Date(), 'yyyy-MM-dd')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                />
+              </div>
               <div>
                 <label htmlFor="tipAmount" className="block text-sm font-medium text-gray-700 mb-1">
                   Amount (€)
