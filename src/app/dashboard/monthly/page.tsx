@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
-import { format, startOfYear, endOfYear, eachMonthOfInterval } from 'date-fns';
+import { format, startOfYear, endOfYear, eachMonthOfInterval, parseISO } from 'date-fns';
 
 interface MonthlyTotal {
   month: string;
@@ -10,14 +10,59 @@ interface MonthlyTotal {
   numberOfTransfers: number;
 }
 
+interface Tip {
+  amount: number;
+  date: string;
+  note?: string;
+}
+
+interface MonthlyTipTotal {
+  month: string;
+  totalAmount: number;
+  numberOfTips: number;
+}
+
 export default function MonthlyOverviewPage() {
   const { data: session, status } = useSession();
   const [monthlyData, setMonthlyData] = useState<MonthlyTotal[]>([]);
+  const [tips, setTips] = useState<Tip[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState<{ current: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState(2025);
   const [lastFetchTime, setLastFetchTime] = useState<number>(0);
+
+  // Load tips from localStorage
+  useEffect(() => {
+    const savedTips = localStorage.getItem('tips');
+    if (savedTips) {
+      setTips(JSON.parse(savedTips));
+    }
+  }, []);
+
+  // Calculate monthly tips totals
+  const calculateMonthlyTips = (year: number) => {
+    const monthlyTips: MonthlyTipTotal[] = eachMonthOfInterval({
+      start: startOfYear(new Date(year, 0)),
+      end: endOfYear(new Date(year, 0))
+    }).map(date => ({
+      month: format(date, 'MMMM yyyy'),
+      totalAmount: 0,
+      numberOfTips: 0
+    }));
+
+    // Filter tips for the selected year and aggregate by month
+    tips.forEach(tip => {
+      const tipDate = parseISO(tip.date);
+      if (tipDate.getFullYear() === year) {
+        const monthIndex = tipDate.getMonth();
+        monthlyTips[monthIndex].totalAmount += tip.amount;
+        monthlyTips[monthIndex].numberOfTips += 1;
+      }
+    });
+
+    return monthlyTips;
+  };
 
   const fetchMonthlyData = useCallback(async (year: number, force: boolean = false) => {
     // Prevent fetching if less than 5 minutes have passed since last fetch
@@ -80,8 +125,12 @@ export default function MonthlyOverviewPage() {
 
   const yearOptions = [2023, 2024, 2025];
   
-  const totalYearlyAmount = monthlyData.reduce((sum, month) => sum + month.totalAmount, 0);
-  const totalYearlyTransfers = monthlyData.reduce((sum, month) => sum + month.numberOfTransfers, 0);
+  const monthlyTips = calculateMonthlyTips(selectedYear);
+  const totalYearlyTransfers = monthlyData.reduce((sum, month) => sum + month.totalAmount, 0);
+  const totalYearlyTips = monthlyTips.reduce((sum, month) => sum + month.totalAmount, 0);
+  const totalYearlyAmount = totalYearlyTransfers + totalYearlyTips;
+  const totalNumberOfTransfers = monthlyData.reduce((sum, month) => sum + month.numberOfTransfers, 0);
+  const totalNumberOfTips = monthlyTips.reduce((sum, month) => sum + month.numberOfTips, 0);
 
   if (status === 'loading') {
     return (
@@ -126,13 +175,29 @@ export default function MonthlyOverviewPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div className="bg-gray-50 rounded-lg p-4">
             <h3 className="text-sm font-medium text-gray-500">Total Yearly Amount</h3>
-            <p className="mt-2 text-2xl font-semibold text-primary">
-              €{totalYearlyAmount.toFixed(2)}
-            </p>
+            <div className="mt-2">
+              <p className="text-2xl font-semibold text-primary">
+                €{totalYearlyAmount.toFixed(2)}
+              </p>
+              {totalYearlyTips > 0 && (
+                <p className="text-sm text-green-600">
+                  (includes €{totalYearlyTips.toFixed(2)} in tips)
+                </p>
+              )}
+            </div>
           </div>
           <div className="bg-gray-50 rounded-lg p-4">
             <h3 className="text-sm font-medium text-gray-500">Total Yearly Orders</h3>
-            <p className="mt-2 text-2xl font-semibold text-gray-900">{totalYearlyTransfers}</p>
+            <div className="mt-2">
+              <p className="text-2xl font-semibold text-gray-900">
+                {totalNumberOfTransfers}
+              </p>
+              {totalNumberOfTips > 0 && (
+                <p className="text-sm text-green-600">
+                  (+{totalNumberOfTips} tips)
+                </p>
+              )}
+            </div>
           </div>
         </div>
 
@@ -157,29 +222,47 @@ export default function MonthlyOverviewPage() {
           </div>
         ) : monthlyData.length > 0 ? (
           <div className="space-y-4">
-            {monthlyData.map((monthData, index) => (
-              <div
-                key={index}
-                className={`flex justify-between items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors ${
-                  monthData.numberOfTransfers === 0 ? 'opacity-50' : ''
-                }`}
-              >
-                <div>
-                  <h3 className="font-medium text-gray-900">{monthData.month}</h3>
-                  <p className="text-sm text-gray-500">{monthData.numberOfTransfers} orders</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-lg font-semibold text-primary">
-                    €{monthData.totalAmount.toFixed(2)}
-                  </p>
-                  {monthData.numberOfTransfers > 0 && (
+            {monthlyData.map((monthData, index) => {
+              const monthTips = monthlyTips[index];
+              const totalMonthAmount = monthData.totalAmount + monthTips.totalAmount;
+              const hasActivity = monthData.numberOfTransfers > 0 || monthTips.numberOfTips > 0;
+
+              return (
+                <div
+                  key={index}
+                  className={`flex justify-between items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors ${
+                    !hasActivity ? 'opacity-50' : ''
+                  }`}
+                >
+                  <div>
+                    <h3 className="font-medium text-gray-900">{monthData.month}</h3>
                     <p className="text-sm text-gray-500">
-                      avg €{(monthData.totalAmount / monthData.numberOfTransfers).toFixed(2)}
+                      {monthData.numberOfTransfers} orders
+                      {monthTips.numberOfTips > 0 && (
+                        <span className="text-green-600">
+                          {' '}(+{monthTips.numberOfTips} tips)
+                        </span>
+                      )}
                     </p>
-                  )}
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-semibold text-primary">
+                      €{totalMonthAmount.toFixed(2)}
+                    </p>
+                    {monthTips.totalAmount > 0 && (
+                      <p className="text-sm text-green-600">
+                        (+€{monthTips.totalAmount.toFixed(2)} tips)
+                      </p>
+                    )}
+                    {hasActivity && (
+                      <p className="text-sm text-gray-500">
+                        avg €{(monthData.totalAmount / (monthData.numberOfTransfers || 1)).toFixed(2)}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-6 text-gray-500">
