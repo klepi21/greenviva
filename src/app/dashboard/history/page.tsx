@@ -1,13 +1,19 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { format, isAfter, startOfToday } from 'date-fns';
+import { format, isAfter, startOfToday, parseISO } from 'date-fns';
 import { useSession } from 'next-auth/react';
 
 interface Transfer {
   from: string;
   amount: number;
   timestamp: string;
+}
+
+interface Tip {
+  amount: number;
+  date: string;
+  note?: string;
 }
 
 export default function HistoryPage() {
@@ -21,6 +27,15 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
+  const [tips, setTips] = useState<Tip[]>([]);
+
+  useEffect(() => {
+    // Load tips from localStorage
+    const savedTips = localStorage.getItem('tips');
+    if (savedTips) {
+      setTips(JSON.parse(savedTips));
+    }
+  }, []);
 
   const fetchTransfers = async (date: string) => {
     try {
@@ -69,7 +84,11 @@ export default function HistoryPage() {
     setSelectedDate(date);
   };
 
-  const totalAmount = transfers.reduce((sum, t) => sum + t.amount, 0);
+  // Filter tips for selected date
+  const selectedDateTips = tips.filter(tip => tip.date.startsWith(selectedDate));
+  const totalTips = selectedDateTips.reduce((sum, tip) => sum + tip.amount, 0);
+  const totalTransfers = transfers.reduce((sum, t) => sum + t.amount, 0);
+  const totalAmount = totalTransfers + totalTips;
   const progressPercentage = (totalAmount / dailyGoal) * 100;
 
   if (status === 'loading') {
@@ -122,6 +141,9 @@ export default function HistoryPage() {
               <div className="mt-2 flex items-baseline">
                 <p className="text-2xl font-semibold text-primary">€{totalAmount.toFixed(2)}</p>
                 <p className="ml-2 text-sm text-gray-500">/ €{dailyGoal}</p>
+                {totalTips > 0 && (
+                  <p className="ml-2 text-sm text-green-600">(+€{totalTips.toFixed(2)} tips)</p>
+                )}
               </div>
               <div className="mt-2">
                 <div className="w-full bg-gray-200 rounded-full h-2">
@@ -136,14 +158,21 @@ export default function HistoryPage() {
             {/* Number of Orders Card */}
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="text-sm font-medium text-gray-500">Number of Orders</h3>
-              <p className="mt-2 text-2xl font-semibold text-gray-900">{transfers.length}</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">
+                {transfers.length}
+                {selectedDateTips.length > 0 && (
+                  <span className="text-sm text-green-600 ml-2">
+                    (+{selectedDateTips.length} tips)
+                  </span>
+                )}
+              </p>
             </div>
 
             {/* Average Order Value Card */}
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="text-sm font-medium text-gray-500">Average Order Value</h3>
               <p className="mt-2 text-2xl font-semibold text-primary">
-                €{transfers.length > 0 ? (totalAmount / transfers.length).toFixed(2) : '0.00'}
+                €{transfers.length > 0 ? (totalTransfers / transfers.length).toFixed(2) : '0.00'}
               </p>
             </div>
           </div>
@@ -153,8 +182,28 @@ export default function HistoryPage() {
           <div className="text-center py-6 text-red-600">{error}</div>
         ) : loading ? (
           <div className="text-center py-6 text-gray-500">Loading transfers...</div>
-        ) : transfers.length > 0 ? (
+        ) : transfers.length > 0 || selectedDateTips.length > 0 ? (
           <div className="space-y-3">
+            {/* Tips */}
+            {selectedDateTips.map((tip, index) => (
+              <div
+                key={`tip-${index}`}
+                className="flex justify-between items-center p-3 bg-green-50 rounded-lg"
+              >
+                <div>
+                  <p className="font-medium text-gray-900">
+                    Cash Tips{tip.note && ` - ${tip.note}`}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {format(parseISO(tip.date), 'HH:mm')}
+                  </p>
+                </div>
+                <span className="text-lg font-semibold text-green-600">
+                  €{tip.amount.toFixed(2)}
+                </span>
+              </div>
+            ))}
+            {/* Regular Transfers */}
             {transfers.map((transfer, index) => {
               // Clean up the 'from' field by removing HTML tags
               const cleanFrom = transfer.from.replace(/<\/?(?:strong|br)>/g, '').trim();
@@ -179,7 +228,7 @@ export default function HistoryPage() {
           </div>
         ) : (
           <div className="text-center py-6 text-gray-500">
-            No transfers found for this date
+            No activity found for this date
           </div>
         )}
       </div>
