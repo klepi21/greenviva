@@ -108,3 +108,111 @@ To complete the implementation, I need:
 - Gmail API requires specific scopes for email access
 - Email parsing needs to be robust to handle various email formats
 - Mobile-first design improves overall user experience 
+
+## New Requirements Analysis (2024-03-21)
+
+### 1. Cross-Device Tips Storage
+Current Implementation:
+- Tips are stored in localStorage
+- Not accessible across devices
+- No persistence beyond browser storage
+
+Proposed Solution:
+1. Use IndexedDB for local storage with sync capability
+   - More robust than localStorage
+   - Can handle larger amounts of data
+   - Better structured data storage
+   
+2. Implement sync mechanism using Gmail Draft folder
+   - Store tips as draft emails in a specific format
+   - Use Gmail API to read/write drafts
+   - No need for external database
+   - Leverages existing Gmail authentication
+   - Provides automatic backup
+   - Works across all devices
+
+### 2. Email Fetching Optimization
+Current Implementation:
+- Fetches emails on demand
+- 5-minute cache to prevent excessive API calls
+- Sequential processing of emails
+
+Optimization Strategies:
+1. Implement Progressive Loading
+   - Load most recent data first
+   - Background load older data
+   - Show loading progress
+
+2. Improve Caching
+   - Cache parsed results, not just raw data
+   - Store cache in IndexedDB
+   - Implement cache invalidation strategy
+
+3. Parallel Processing
+   - Process multiple emails simultaneously
+   - Use Promise.all for parallel requests
+   - Implement rate limiting to prevent API throttling
+
+## High-level Task Breakdown (New Features)
+
+### Phase 1: Tips Storage Migration
+1. Implement IndexedDB Storage
+   - Create IndexedDB schema for tips
+   - Migrate existing localStorage data
+   - Update CRUD operations
+   Success Criteria: Tips persist across browser sessions
+
+2. Implement Gmail Draft Sync
+   - Create draft format specification
+   - Implement draft read/write functions
+   - Create sync mechanism
+   Success Criteria: Tips sync across devices
+
+### Phase 2: Email Fetching Optimization
+1. Implement Progressive Loading
+   - Add loading progress indicators
+   - Implement background loading
+   Success Criteria: Initial load under 2 seconds
+
+2. Enhance Caching System
+   - Implement IndexedDB cache
+   - Add cache invalidation
+   Success Criteria: Subsequent loads instant
+
+3. Add Parallel Processing
+   - Implement batch processing
+   - Add rate limiting
+   Success Criteria: Full sync under 30 seconds
+
+## Project Status Board (New Tasks)
+- [x] IndexedDB Implementation
+  - [x] Create database schema
+  - [x] Create sync service
+  - [x] Add error handling
+- [x] Gmail Draft Sync
+  - [x] Design draft format
+  - [x] Implement sync logic
+  - [x] Add error handling
+- [x] Email Fetch Optimization
+  - [x] Add progress tracking
+  - [x] Implement caching
+  - [x] Add parallel processing
+
+## Current Status / Progress Tracking
+Implementation complete for:
+1. Cross-device tips storage using IndexedDB + Gmail Draft sync
+2. Email fetching optimization with:
+   - Parallel processing (10 emails at a time)
+   - Caching with IndexedDB (5 min TTL for daily data, 24h for monthly)
+   - Rate limiting and retry mechanism
+
+Next steps:
+1. Test the implementation
+2. Monitor performance improvements
+3. Gather user feedback
+
+## Executor's Feedback or Assistance Requests
+Implementation is complete. Key points to note:
+1. Users will need to re-authenticate due to new Gmail scope for drafts
+2. First load might be slower due to cache population
+3. Subsequent loads should be near-instant from cache 

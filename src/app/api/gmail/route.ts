@@ -3,12 +3,29 @@ import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { format, parseISO, startOfDay, endOfDay, addDays } from 'date-fns';
 import { authOptions } from '../auth/[...nextauth]/auth.config';
+import { CacheService } from '@/lib/cache';
 
 interface Transfer {
   from: string;
   amount: number;
   timestamp: string;
 }
+
+interface MessageHeader {
+  name: string;
+  value: string;
+}
+
+interface MessagePart {
+  mimeType: string;
+  body?: {
+    data?: string;
+  };
+}
+
+const cache = new CacheService();
+const BATCH_SIZE = 10; // Number of emails to process in parallel
+const MAX_RETRIES = 3;
 
 function parseEmailBody(body: string): Transfer | null {
   try {
@@ -48,6 +65,63 @@ function decodeEmailBody(encodedBody: string): string {
   }
 }
 
+async function processEmail(gmail: any, messageId: string, retryCount = 0): Promise<Transfer | null> {
+  try {
+    const email = await gmail.users.messages.get({
+      userId: 'me',
+      id: messageId,
+      format: 'full',
+    });
+
+    const payload = email.data.payload!;
+    const headers = payload.headers! as MessageHeader[];
+    const emailDate = headers.find((h: MessageHeader) => h.name === 'Date')?.value;
+
+    if (!emailDate) {
+      console.log(`No date found for message ${messageId}`);
+      return null;
+    }
+
+    let emailBody = '';
+    if (payload.body?.data) {
+      emailBody = decodeEmailBody(payload.body.data);
+    } else if (payload.parts) {
+      const textPart = payload.parts.find((part: MessagePart) => 
+        part.mimeType === 'text/plain' || part.mimeType === 'text/html'
+      );
+      if (textPart?.body?.data) {
+        emailBody = decodeEmailBody(textPart.body.data);
+      }
+    }
+
+    const transfer = parseEmailBody(emailBody);
+    if (transfer) {
+      transfer.timestamp = emailDate;
+      return transfer;
+    }
+    return null;
+  } catch (error: any) {
+    if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
+      // Rate limit hit, wait and retry
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+      return processEmail(gmail, messageId, retryCount + 1);
+    }
+    throw error;
+  }
+}
+
+async function processBatch(gmail: any, messageIds: string[]): Promise<Transfer[]> {
+  const results = await Promise.allSettled(
+    messageIds.map(id => processEmail(gmail, id))
+  );
+
+  return results
+    .filter((result): result is PromiseFulfilledResult<Transfer> => 
+      result.status === 'fulfilled' && result.value !== null
+    )
+    .map(result => result.value);
+}
+
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
@@ -72,12 +146,15 @@ export async function GET(request: Request) {
     const dayStart = startOfDay(date);
     const dayEnd = endOfDay(date);
 
-    console.log('Search Parameters:', {
-      dateParam,
-      date: format(date, 'yyyy-MM-dd'),
-      dayStart: format(dayStart, 'yyyy-MM-dd'),
-      dayEnd: format(dayEnd, 'yyyy-MM-dd')
-    });
+    // Generate cache key
+    const cacheKey = `transfers-${format(date, 'yyyy-MM-dd')}`;
+    
+    // Try to get from cache first
+    const cachedData = await cache.get(cacheKey);
+    if (cachedData) {
+      console.log('Returning cached data for:', cacheKey);
+      return NextResponse.json({ transfers: cachedData });
+    }
 
     const auth = new google.auth.OAuth2();
     auth.setCredentials({ 
@@ -91,112 +168,30 @@ export async function GET(request: Request) {
     const query = `from:no-reply@viva.com after:${format(dayStart, 'yyyy/MM/dd')} before:${format(addDays(dayEnd, 1), 'yyyy/MM/dd')}`;
     console.log('Gmail Query:', query);
 
-    try {
-      const response = await gmail.users.messages.list({
-        userId: 'me',
-        q: query,
-      });
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+    });
 
-      console.log('Gmail Response:', {
-        messagesCount: response.data.messages?.length || 0,
-        resultSizeEstimate: response.data.resultSizeEstimate,
-      });
+    const messages = response.data.messages || [];
+    const transfers: Transfer[] = [];
 
-      const messages = response.data.messages || [];
-      const transfers: Transfer[] = [];
-
-      for (const message of messages) {
-        try {
-          console.log(`Processing message ID: ${message.id}`);
-          const email = await gmail.users.messages.get({
-            userId: 'me',
-            id: message.id!,
-            format: 'full',
-          });
-
-          const payload = email.data.payload!;
-          const headers = payload.headers!;
-          const emailDate = headers.find(h => h.name === 'Date')?.value;
-
-          if (!emailDate) {
-            console.log(`No date found for message ${message.id}`);
-            continue;
-          }
-
-          let emailBody = '';
-          if (payload.body?.data) {
-            emailBody = decodeEmailBody(payload.body.data);
-          } else if (payload.parts) {
-            // Try to find HTML or plain text part
-            const textPart = payload.parts.find(part => 
-              part.mimeType === 'text/plain' || part.mimeType === 'text/html'
-            );
-            if (textPart?.body?.data) {
-              emailBody = decodeEmailBody(textPart.body.data);
-            }
-          }
-
-          console.log('Email Content:', {
-            id: message.id,
-            date: emailDate,
-            bodyLength: emailBody.length,
-            bodyPreview: emailBody.substring(0, 200),
-            hasAmount: emailBody.includes('Amount') || emailBody.includes('Ποσό'),
-            hasFrom: emailBody.includes('From') || emailBody.includes('Από')
-          });
-
-          const transfer = parseEmailBody(emailBody);
-          if (transfer) {
-            transfer.timestamp = emailDate;
-            transfers.push(transfer);
-            console.log('Found transfer:', transfer);
-          } else {
-            console.log(`No transfer data found in message ${message.id}`);
-          }
-        } catch (error: any) {
-          if (error.response?.status === 401) {
-            return NextResponse.json(
-              { error: 'Your session has expired. Please sign in again.' },
-              { status: 401 }
-            );
-          }
-          if (error.code === 403 || error.response?.status === 403) {
-            return NextResponse.json(
-              { error: 'Gmail API error: Access denied. Please sign in again.' },
-              { status: 401 }
-            );
-          }
-          console.error(`Error processing message ${message.id}:`, error);
-          continue;
-        }
-      }
-
-      console.log('Final transfers:', transfers);
-
-      return NextResponse.json({
-        transfers: transfers.sort((a, b) => 
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        ),
-      });
-    } catch (error: any) {
-      if (error.response?.status === 401 || error.code === 401) {
-        return NextResponse.json(
-          { error: 'Your session has expired. Please sign in again.' },
-          { status: 401 }
-        );
-      }
-      if (error.code === 403 || error.response?.status === 403) {
-        return NextResponse.json(
-          { error: 'Gmail API error: Access denied. Please sign in again.' },
-          { status: 401 }
-        );
-      }
-      console.error('Gmail API error:', error);
-      return NextResponse.json(
-        { error: 'Gmail API error: Failed to fetch emails. Please sign in again.' },
-        { status: 401 }
-      );
+    // Process messages in batches
+    for (let i = 0; i < messages.length; i += BATCH_SIZE) {
+      const batch = messages.slice(i, i + BATCH_SIZE);
+      const batchResults = await processBatch(gmail, batch.map(m => m.id!));
+      transfers.push(...batchResults);
     }
+
+    // Sort transfers by timestamp
+    const sortedTransfers = transfers.sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+
+    // Cache the results
+    await cache.set(cacheKey, sortedTransfers);
+
+    return NextResponse.json({ transfers: sortedTransfers });
   } catch (error: any) {
     console.error('Error in GET handler:', error);
     if (error.response?.status === 401 || error.code === 401 || error.code === 403) {

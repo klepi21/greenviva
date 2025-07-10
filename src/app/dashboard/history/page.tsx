@@ -11,9 +11,11 @@ interface Transfer {
 }
 
 interface Tip {
+  id: string;
   amount: number;
   date: string;
   note?: string;
+  synced?: boolean;
 }
 
 export default function HistoryPage() {
@@ -28,14 +30,28 @@ export default function HistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [tips, setTips] = useState<Tip[]>([]);
+  const [syncService, setSyncService] = useState<any>(null);
 
+  // Initialize sync service when session is available
   useEffect(() => {
-    // Load tips from localStorage
-    const savedTips = localStorage.getItem('tips');
-    if (savedTips) {
-      setTips(JSON.parse(savedTips));
+    if (session?.accessToken) {
+      const { SyncService } = require('@/lib/sync');
+      const service = new SyncService(session.accessToken);
+      setSyncService(service);
+      
+      // Initialize and load tips
+      service.initialize().then(() => {
+        return service.getTipsByDate(selectedDate);
+      }).then((loadedTips: Tip[]) => {
+        setTips(loadedTips);
+        setLoading(false);
+      }).catch((err: Error) => {
+        console.error('Error initializing sync service:', err);
+        setError('Failed to load tips. Please try again later.');
+        setLoading(false);
+      });
     }
-  }, []);
+  }, [session?.accessToken, selectedDate]);
 
   const fetchTransfers = async (date: string) => {
     try {
@@ -56,6 +72,12 @@ export default function HistoryPage() {
       console.log('API Response data:', data);
       
       setTransfers(data.transfers || []);
+
+      // Load tips for the selected date
+      if (syncService) {
+        const dateTips = await syncService.getTipsByDate(date);
+        setTips(dateTips);
+      }
     } catch (err) {
       console.error('Error fetching transfers:', err);
       setError('Failed to fetch transfers. Please try again later.');
@@ -72,7 +94,7 @@ export default function HistoryPage() {
       console.log('User is not authenticated');
       setError('Please sign in to view transfers');
     }
-  }, [status, session]);
+  }, [status, session, selectedDate]);
 
   const handleDateChange = (date: string) => {
     const selectedDateTime = new Date(date);
@@ -185,9 +207,9 @@ export default function HistoryPage() {
         ) : transfers.length > 0 || selectedDateTips.length > 0 ? (
           <div className="space-y-3">
             {/* Tips */}
-            {selectedDateTips.map((tip, index) => (
+            {tips.map((tip) => (
               <div
-                key={`tip-${index}`}
+                key={tip.id}
                 className="flex justify-between items-center p-3 bg-green-50 rounded-lg"
               >
                 <div>

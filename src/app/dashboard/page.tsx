@@ -12,9 +12,11 @@ interface Transfer {
 }
 
 interface Tip {
+  id: string;
   amount: number;
   date: string;
   note?: string;
+  synced?: boolean;
 }
 
 export default function DashboardPage() {
@@ -29,6 +31,7 @@ export default function DashboardPage() {
   const [tipNote, setTipNote] = useState('');
   const [tipDate, setTipDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [tips, setTips] = useState<Tip[]>([]);
+  const [syncService, setSyncService] = useState<any>(null);
   const [earningsData, setEarningsData] = useState<{
     totalAmount: number;
     goal: number;
@@ -39,18 +42,26 @@ export default function DashboardPage() {
     transfers: [],
   });
 
-  // Load tips from localStorage
+  // Initialize sync service when session is available
   useEffect(() => {
-    const savedTips = localStorage.getItem('tips');
-    if (savedTips) {
-      setTips(JSON.parse(savedTips));
+    if (session?.accessToken) {
+      const { SyncService } = require('@/lib/sync');
+      const service = new SyncService(session.accessToken);
+      setSyncService(service);
+      
+      // Initialize and load tips
+      service.initialize().then(() => {
+        return service.getTips();
+      }).then((loadedTips: Tip[]) => {
+        setTips(loadedTips);
+        setLoading(false);
+      }).catch((err: Error) => {
+        console.error('Error initializing sync service:', err);
+        setError('Failed to load tips. Please try again later.');
+        setLoading(false);
+      });
     }
-  }, []);
-
-  // Save tips to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem('tips', JSON.stringify(tips));
-  }, [tips]);
+  }, [session?.accessToken]);
 
   const handleSignOut = async () => {
     await signOut({ redirect: false });
@@ -58,30 +69,44 @@ export default function DashboardPage() {
     signIn('google');
   };
 
-  const addTip = () => {
-    if (!tipAmount) return;
+  const addTip = async () => {
+    if (!tipAmount || !syncService) return;
     
-    const newTip: Tip = {
-      amount: parseFloat(tipAmount),
-      date: new Date(`${tipDate}T12:00:00`).toISOString(), // Use noon of selected date
-      note: tipNote || undefined
-    };
+    try {
+      const newTip = await syncService.addTip({
+        amount: parseFloat(tipAmount),
+        date: new Date(`${tipDate}T12:00:00`).toISOString(),
+        note: tipNote || undefined
+      });
 
-    setTips(prevTips => {
-      // Sort tips by date, most recent first
-      const newTips = [...prevTips, newTip].sort((a, b) => 
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
-      return newTips;
-    });
-    setTipAmount('');
-    setTipNote('');
-    setTipDate(format(new Date(), 'yyyy-MM-dd')); // Reset to today
-    setShowTipModal(false);
+      setTips(prevTips => {
+        // Sort tips by date, most recent first
+        const newTips = [...prevTips, newTip].sort((a, b) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        return newTips;
+      });
+
+      setTipAmount('');
+      setTipNote('');
+      setTipDate(format(new Date(), 'yyyy-MM-dd')); // Reset to today
+      setShowTipModal(false);
+    } catch (err) {
+      console.error('Error adding tip:', err);
+      setError('Failed to add tip. Please try again.');
+    }
   };
 
-  const removeTip = (index: number) => {
-    setTips(prevTips => prevTips.filter((_, i) => i !== index));
+  const removeTip = async (id: string) => {
+    if (!syncService) return;
+    
+    try {
+      await syncService.deleteTip(id);
+      setTips(prevTips => prevTips.filter(tip => tip.id !== id));
+    } catch (err) {
+      console.error('Error removing tip:', err);
+      setError('Failed to remove tip. Please try again.');
+    }
   };
 
   const getTodaysTips = () => {
@@ -250,9 +275,9 @@ export default function DashboardPage() {
           {earningsData.transfers.length > 0 || tips.length > 0 ? (
             <div className="space-y-3">
               {/* Tips */}
-              {tips.map((tip, index) => (
+              {tips.map((tip) => (
                 <div
-                  key={`tip-${index}`}
+                  key={tip.id}
                   className={`flex justify-between items-center p-3 ${
                     isToday(parseISO(tip.date)) ? 'bg-green-50' : 'bg-gray-50'
                   } rounded-lg`}
@@ -272,7 +297,7 @@ export default function DashboardPage() {
                       €{tip.amount.toFixed(2)}
                     </span>
                     <button
-                      onClick={() => removeTip(index)}
+                      onClick={() => removeTip(tip.id)}
                       className="text-red-500 hover:text-red-600"
                     >
                       ×

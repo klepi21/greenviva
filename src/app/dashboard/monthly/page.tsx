@@ -11,9 +11,11 @@ interface MonthlyTotal {
 }
 
 interface Tip {
+  id: string;
   amount: number;
   date: string;
   note?: string;
+  synced?: boolean;
 }
 
 interface MonthlyTipTotal {
@@ -31,14 +33,28 @@ export default function MonthlyOverviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState(2025);
   const [lastFetchTime, setLastFetchTime] = useState<number>(0);
+  const [syncService, setSyncService] = useState<any>(null);
 
-  // Load tips from localStorage
+  // Initialize sync service when session is available
   useEffect(() => {
-    const savedTips = localStorage.getItem('tips');
-    if (savedTips) {
-      setTips(JSON.parse(savedTips));
+    if (session?.accessToken) {
+      const { SyncService } = require('@/lib/sync');
+      const service = new SyncService(session.accessToken);
+      setSyncService(service);
+      
+      // Initialize and load tips
+      service.initialize().then(() => {
+        return service.getTips();
+      }).then((loadedTips: Tip[]) => {
+        setTips(loadedTips);
+        setLoading(false);
+      }).catch((err: Error) => {
+        console.error('Error initializing sync service:', err);
+        setError('Failed to load tips. Please try again later.');
+        setLoading(false);
+      });
     }
-  }, []);
+  }, [session?.accessToken]);
 
   // Calculate monthly tips totals
   const calculateMonthlyTips = (year: number) => {
