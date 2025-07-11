@@ -129,9 +129,15 @@ export default function DashboardPage() {
       const data = await response.json();
       
       if (!response.ok) {
-        if (response.status === 401 || data.error?.includes('Gmail API error')) {
+        if (response.status === 401) {
           handleSignOut();
           throw new Error('Session expired. Please sign in again.');
+        }
+        if (response.status === 429) {
+          throw new Error('Too many requests. Please try again in a few minutes.');
+        }
+        if (response.status === 503) {
+          throw new Error('Connection error. Please check your internet connection and try again.');
         }
         throw new Error(data.error || 'Failed to fetch transfers');
       }
@@ -148,7 +154,7 @@ export default function DashboardPage() {
       console.error('Error fetching transfers:', err);
       setError(err.message || 'Failed to fetch transfers. Please try again later.');
       
-      if (err.message?.includes('Gmail API error')) {
+      if (err.message?.includes('Session expired')) {
         handleSignOut();
       }
     } finally {
@@ -164,6 +170,7 @@ export default function DashboardPage() {
       return;
     }
 
+    // Only fetch on initial load or when forced
     fetchTransfers(false);
   }, [session, status, router, fetchTransfers]);
 

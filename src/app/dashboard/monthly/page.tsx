@@ -93,8 +93,19 @@ export default function MonthlyOverviewPage() {
       setError(null);
 
       const response = await fetch(`/api/gmail/monthly?year=${year}`);
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to fetch monthly data');
+        if (response.status === 401) {
+          throw new Error('Please sign in to view monthly data');
+        }
+        if (response.status === 429) {
+          throw new Error('Too many requests. Please try again in a few minutes.');
+        }
+        if (response.status === 503) {
+          throw new Error('Connection error. Please check your internet connection and try again.');
+        }
+        throw new Error(data.error || 'Failed to fetch monthly data');
       }
 
       // Create a map of all months in the year with zero values
@@ -107,7 +118,6 @@ export default function MonthlyOverviewPage() {
         numberOfTransfers: 0
       }));
 
-      const data = await response.json();
       if (data.error) {
         throw new Error(data.error);
       }
@@ -124,7 +134,7 @@ export default function MonthlyOverviewPage() {
       setLastFetchTime(now);
     } catch (err) {
       console.error('Error fetching monthly data:', err);
-      setError('Failed to fetch monthly data. Please try again later.');
+      setError(err instanceof Error ? err.message : 'Failed to fetch monthly data. Please try again later.');
     } finally {
       setLoading(false);
       setLoadingProgress(null);

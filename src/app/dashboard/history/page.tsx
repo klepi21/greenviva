@@ -62,25 +62,37 @@ export default function HistoryPage() {
       const response = await fetch(`/api/gmail?date=${date}`);
       console.log('API Response status:', response.status);
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('API Error:', errorData);
-        throw new Error(errorData.error || 'Failed to fetch transfers');
-      }
-
       const data = await response.json();
       console.log('API Response data:', data);
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Please sign in to view transfers');
+        }
+        if (response.status === 429) {
+          throw new Error('Too many requests. Please try again in a few minutes.');
+        }
+        if (response.status === 503) {
+          throw new Error('Connection error. Please check your internet connection and try again.');
+        }
+        throw new Error(data.error || 'Failed to fetch transfers');
+      }
       
       setTransfers(data.transfers || []);
 
       // Load tips for the selected date
       if (syncService) {
-        const dateTips = await syncService.getTipsByDate(date);
-        setTips(dateTips);
+        try {
+          const dateTips = await syncService.getTipsByDate(date);
+          setTips(dateTips);
+        } catch (tipError) {
+          console.error('Error loading tips:', tipError);
+          // Don't fail the whole operation if tips fail to load
+        }
       }
     } catch (err) {
       console.error('Error fetching transfers:', err);
-      setError('Failed to fetch transfers. Please try again later.');
+      setError(err instanceof Error ? err.message : 'Failed to fetch transfers. Please try again later.');
     } finally {
       setLoading(false);
     }

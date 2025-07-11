@@ -150,10 +150,15 @@ export async function GET(request: Request) {
     const cacheKey = `transfers-${format(date, 'yyyy-MM-dd')}`;
     
     // Try to get from cache first
-    const cachedData = await cache.get(cacheKey);
-    if (cachedData) {
-      console.log('Returning cached data for:', cacheKey);
-      return NextResponse.json({ transfers: cachedData });
+    try {
+      const cachedData = await cache.get(cacheKey);
+      if (cachedData) {
+        console.log('Returning cached data for:', cacheKey);
+        return NextResponse.json({ transfers: cachedData });
+      }
+    } catch (cacheError) {
+      console.error('Cache error:', cacheError);
+      // Continue without cache if there's an error
     }
 
     const auth = new google.auth.OAuth2();
@@ -168,19 +173,49 @@ export async function GET(request: Request) {
     const query = `from:no-reply@viva.com after:${format(dayStart, 'yyyy/MM/dd')} before:${format(addDays(dayEnd, 1), 'yyyy/MM/dd')}`;
     console.log('Gmail Query:', query);
 
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      q: query,
-    });
+    let response;
+    try {
+      response = await gmail.users.messages.list({
+        userId: 'me',
+        q: query,
+      });
+    } catch (apiError: any) {
+      console.error('Gmail API error:', apiError);
+      if (apiError.response?.status === 401 || apiError.code === 401 || apiError.code === 403) {
+        return NextResponse.json(
+          { error: 'Your session has expired. Please sign in again.' },
+          { status: 401 }
+        );
+      }
+      if (apiError.response?.status === 429) {
+        return NextResponse.json(
+          { error: 'Too many requests. Please try again in a few minutes.' },
+          { status: 429 }
+        );
+      }
+      throw apiError;
+    }
 
     const messages = response.data.messages || [];
     const transfers: Transfer[] = [];
 
     // Process messages in batches
     for (let i = 0; i < messages.length; i += BATCH_SIZE) {
-      const batch = messages.slice(i, i + BATCH_SIZE);
-      const batchResults = await processBatch(gmail, batch.map(m => m.id!));
-      transfers.push(...batchResults);
+      try {
+        const batch = messages.slice(i, i + BATCH_SIZE);
+        const batchResults = await processBatch(gmail, batch.map(m => m.id!));
+        transfers.push(...batchResults);
+      } catch (batchError: any) {
+        console.error(`Error processing batch ${i}:`, batchError);
+        if (batchError.response?.status === 429) {
+          return NextResponse.json(
+            { error: 'Too many requests. Please try again in a few minutes.' },
+            { status: 429 }
+          );
+        }
+        // Continue with next batch if there's an error
+        continue;
+      }
     }
 
     // Sort transfers by timestamp
@@ -189,19 +224,44 @@ export async function GET(request: Request) {
     );
 
     // Cache the results
-    await cache.set(cacheKey, sortedTransfers);
+    try {
+      await cache.set(cacheKey, sortedTransfers);
+    } catch (cacheError) {
+      console.error('Error caching results:', cacheError);
+      // Continue without caching if there's an error
+    }
 
     return NextResponse.json({ transfers: sortedTransfers });
   } catch (error: any) {
     console.error('Error in GET handler:', error);
+    
+    // Handle specific error cases
     if (error.response?.status === 401 || error.code === 401 || error.code === 403) {
       return NextResponse.json(
         { error: 'Your session has expired. Please sign in again.' },
         { status: 401 }
       );
     }
+    
+    if (error.response?.status === 429) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again in a few minutes.' },
+        { status: 429 }
+      );
+    }
+
+    if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+      return NextResponse.json(
+        { error: 'Connection error. Please check your internet connection and try again.' },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'An unexpected error occurred. Please try again later.' },
+      { 
+        error: 'An unexpected error occurred. Please try again later.',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      },
       { status: 500 }
     );
   }
