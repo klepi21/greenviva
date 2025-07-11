@@ -1,20 +1,21 @@
 import { TipsDatabase, Tip } from './db';
-import { GmailService } from './gmail';
 
 export class SyncService {
   private db: TipsDatabase;
-  private gmail: GmailService;
   private syncInProgress = false;
 
-  constructor(accessToken: string) {
+  constructor() {
     this.db = new TipsDatabase();
-    this.gmail = new GmailService(accessToken);
   }
 
   async initialize(): Promise<void> {
     try {
-      // Load tips from Gmail
-      const remoteTips = await this.gmail.loadTips();
+      // Load tips from API
+      const response = await fetch('/api/tips/sync');
+      if (!response.ok) {
+        throw new Error('Failed to fetch tips');
+      }
+      const { tips: remoteTips } = await response.json();
       
       // Get local tips
       const localTips = await this.db.getTips();
@@ -54,8 +55,18 @@ export class SyncService {
       // Get all tips from local DB
       const localTips = await this.db.getTips();
       
-      // Sync to Gmail
-      await this.gmail.syncTips(localTips);
+      // Sync to API
+      const response = await fetch('/api/tips/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(localTips),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to sync tips');
+      }
       
       // Mark all as synced
       for (const tip of localTips) {

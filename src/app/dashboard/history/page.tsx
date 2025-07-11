@@ -34,9 +34,9 @@ export default function HistoryPage() {
 
   // Initialize sync service when session is available
   useEffect(() => {
-    if (session?.accessToken) {
+    if (session) {
       const { SyncService } = require('@/lib/sync');
-      const service = new SyncService(session.accessToken);
+      const service = new SyncService();
       setSyncService(service);
       
       // Initialize and load tips
@@ -51,7 +51,7 @@ export default function HistoryPage() {
         setLoading(false);
       });
     }
-  }, [session?.accessToken, selectedDate]);
+  }, [session, selectedDate]);
 
   const fetchTransfers = async (date: string) => {
     try {

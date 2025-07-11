@@ -44,9 +44,9 @@ export default function DashboardPage() {
 
   // Initialize sync service when session is available
   useEffect(() => {
-    if (session?.accessToken) {
+    if (session) {
       const { SyncService } = require('@/lib/sync');
-      const service = new SyncService(session.accessToken);
+      const service = new SyncService();
       setSyncService(service);
       
       // Initialize and load tips
@@ -61,7 +61,7 @@ export default function DashboardPage() {
         setLoading(false);
       });
     }
-  }, [session?.accessToken]);
+  }, [session]);
 
   const handleSignOut = async () => {
     await signOut({ redirect: false });
