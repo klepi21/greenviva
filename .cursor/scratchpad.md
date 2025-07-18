@@ -91,6 +91,12 @@ The project aims to create a mobile-optimized web application that tracks and an
   - Added date filtering
   - Added sorting by timestamp
 
+- [x] Add a sign out button to the dashboard navigation
+- [x] Implement automatic sign out after 5 minutes of inactivity
+- [x] Remove forced auto-login after sign out (let user choose to sign in again)
+- [x] Disable auto-redirect/auto-login on the sign-in page (let user choose to sign in)
+- [ ] Await user confirmation that all changes work as expected
+
 ## Current Status / Progress Tracking
 Core functionality implementation is complete. Next steps:
 1. Need Google Cloud client secret to complete OAuth setup
@@ -216,3 +222,11 @@ Implementation is complete. Key points to note:
 1. Users will need to re-authenticate due to new Gmail scope for drafts
 2. First load might be slower due to cache population
 3. Subsequent loads should be near-instant from cache 
+
+All requested changes have been implemented:
+- There is now a visible sign out button in the dashboard navigation (desktop only, can add to mobile if needed).
+- The app will automatically sign out after 5 minutes of inactivity (mouse or keyboard events reset the timer).
+- After sign out, the user is redirected to the home page and must manually click the sign in button (no more forced Google login).
+- The sign-in page no longer auto-redirects or auto-logs in; the user must click the sign in button.
+
+Please test the new behavior and confirm if it meets your requirements. If you need further adjustments (e.g., sign out button on mobile, different inactivity timeout, etc.), let me know before marking the tasks as complete. 

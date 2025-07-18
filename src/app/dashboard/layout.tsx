@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { format } from 'date-fns';
@@ -14,6 +14,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { status } = useSession();
+  const inactivityTimer = useRef<NodeJS.Timeout | null>(null);
 
   const today = new Date();
   const formattedDate = format(today, 'dd/MM/yyyy');
@@ -23,6 +24,25 @@ export default function DashboardLayout({
       router.push('/');
     }
   }, [status, router]);
+
+  // Sign out after 5 minutes of inactivity
+  useEffect(() => {
+    const resetTimer = () => {
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      inactivityTimer.current = setTimeout(() => {
+        signOut({ redirect: true, callbackUrl: '/' });
+      }, 5 * 60 * 1000); // 5 minutes
+    };
+    // Listen for user activity
+    window.addEventListener('mousemove', resetTimer);
+    window.addEventListener('keydown', resetTimer);
+    resetTimer();
+    return () => {
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      window.removeEventListener('mousemove', resetTimer);
+      window.removeEventListener('keydown', resetTimer);
+    };
+  }, []);
 
   const handleLogout = async () => {
     await signOut({ redirect: true, callbackUrl: '/' });
@@ -75,6 +95,14 @@ export default function DashboardLayout({
               >
                 History
               </Link>
+            </div>
+            <div className="flex items-center">
+              <button
+                onClick={handleLogout}
+                className="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-lg hover:bg-red-600"
+              >
+                Sign Out
+              </button>
             </div>
           </div>
         </div>

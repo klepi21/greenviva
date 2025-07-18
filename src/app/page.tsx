@@ -10,9 +10,10 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    if (status === 'authenticated') {
-      router.push('/dashboard');
-    }
+    // Remove auto-redirect to dashboard on authenticated
+    // if (status === 'authenticated') {
+    //   router.push('/dashboard');
+    // }
   }, [status, router]);
 
   return (
@@ -36,10 +37,6 @@ export default function Home() {
           {status === 'loading' ? (
             <div className="flex justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            </div>
-          ) : status === 'authenticated' ? (
-            <div className="text-center text-gray-600">
-              Redirecting to dashboard...
             </div>
           ) : (
             <button

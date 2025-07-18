@@ -66,7 +66,6 @@ export default function DashboardPage() {
   const handleSignOut = async () => {
     await signOut({ redirect: false });
     router.push('/');
-    signIn('google');
   };
 
   const addTip = async () => {
