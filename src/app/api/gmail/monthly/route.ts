@@ -76,6 +76,13 @@ async function processBatch(gmail: any, messageIds: string[]): Promise<{ amount:
     messageIds.map(id => processEmail(gmail, id))
   );
 
+  // If any result is a rate limit error, throw a 429
+  for (const result of results) {
+    if (result.status === 'rejected' && result.reason?.response?.status === 429) {
+      throw { code: 429, message: 'Rate limit exceeded' };
+    }
+  }
+
   return results
     .filter((result): result is PromiseFulfilledResult<{ amount: number; date: Date }> => 
       result.status === 'fulfilled' && result.value !== null
@@ -123,8 +130,17 @@ export async function GET(request: NextRequest) {
     // Process messages in batches
     for (let i = 0; i < messages.length; i += BATCH_SIZE) {
       const batch = messages.slice(i, i + BATCH_SIZE);
-      const batchResults = await processBatch(gmail, batch.map(m => m.id!));
-      transfers.push(...batchResults);
+      try {
+        const batchResults = await processBatch(gmail, batch.map(m => m.id!));
+        transfers.push(...batchResults);
+      } catch (err: any) {
+        if (err.code === 429) {
+          return NextResponse.json({ error: 'Too many requests. Please try again in a few minutes.' }, { status: 429 });
+        }
+        throw err;
+      }
+      // Add a delay between batches to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     // Group transfers by month
