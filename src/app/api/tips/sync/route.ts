@@ -123,7 +123,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ tips: [] });
     }
 
-    const tips = JSON.parse(match[0]);
+    let tips;
+    try {
+      tips = JSON.parse(match[0]);
+      if (!Array.isArray(tips)) {
+        tips = [];
+      }
+    } catch (e) {
+      tips = [];
+    }
     return NextResponse.json({ tips });
   } catch (error: any) {
     console.error('Error in sync handler:', error);

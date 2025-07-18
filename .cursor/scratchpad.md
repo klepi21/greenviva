@@ -230,3 +230,10 @@ All requested changes have been implemented:
 - The sign-in page no longer auto-redirects or auto-logs in; the user must click the sign in button.
 
 Please test the new behavior and confirm if it meets your requirements. If you need further adjustments (e.g., sign out button on mobile, different inactivity timeout, etc.), let me know before marking the tasks as complete. 
+
+## Lessons
+- Bug: The /api/tips/sync GET endpoint could return a non-array for 'tips', causing a frontend crash (TypeError: t.forEach is not a function). Fix: Always return an array for 'tips', even if the parsed JSON is not an array or parsing fails.
+
+## Executor's Feedback or Assistance Requests
+- Fixed a backend bug that could cause the monthly data fetch to fail and the frontend to crash if the Gmail draft contained invalid or non-array JSON for tips. The endpoint now always returns an array.
+- Please test the monthly data fetch again. If you still see errors, let me know the exact error message and year selected. 
